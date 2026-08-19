@@ -6,7 +6,17 @@ import crypto from 'crypto'
 // Generate TOTP secret
 function generateSecret(): string {
   const bytes = crypto.randomBytes(20)
-  return bytes.toString('base32')
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+  let bits = ''
+  for (const b of bytes) {
+    bits += b.toString(2).padStart(8, '0')
+  }
+  let result = ''
+  for (let i = 0; i < bits.length; i += 5) {
+    const chunk = bits.slice(i, i + 5).padEnd(5, '0')
+    result += alphabet[parseInt(chunk, 2)]
+  }
+  return result
 }
 
 // Generate TOTP code from secret

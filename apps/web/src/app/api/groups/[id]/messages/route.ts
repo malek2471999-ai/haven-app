@@ -154,6 +154,14 @@ export async function POST(
     )
 
     let finalMsg = { ...msgWithUser.rows[0], reactions: [] }
+
+    const groupCheck = await query(
+      `SELECT is_anonymous FROM conversations WHERE id = $1`,
+      [params.id]
+    )
+    const isAnonymous = groupCheck.rows[0]?.is_anonymous
+    const isOwner = memberInfo?.role === 'owner'
+
     if (isAnonymous && !isOwner) {
       finalMsg = {
         ...finalMsg,

@@ -4,8 +4,9 @@ const JWT_SECRET = process.env.JWT_SECRET || 'haven-secret-key-change-in-product
 
 export interface JWTPayload {
   userId: string
-  email: string
-  username: string
+  email?: string
+  username?: string
+  type?: string
 }
 
 export function signToken(payload: JWTPayload): string {

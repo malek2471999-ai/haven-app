@@ -188,7 +188,7 @@ export default function RecoveryCodesPage() {
         <div className="p-4 rounded-xl bg-dark-800/50 border border-dark-700/30 space-y-2">
           <p className="text-xs text-dark-400">
             <strong className="text-dark-300">كيف تستخدم:</strong> عند نسيان كلمة المرور، اذهب إلى
-            "نسيت كلمة المرور" واختر "استخدام كود استرداد" وأدخل أحد الأكواد.
+            &quot;نسيت كلمة المرور&quot; واختر &quot;استخدام كود استرداد&quot; وأدخل أحد الأكواد.
           </p>
         </div>
       </div>

@@ -12,7 +12,7 @@ interface AuthState {
     username: string
     displayName: string
     password: string
-  }) => Promise<{ error?: string }>
+  }) => Promise<{ error?: string; recoveryCodes?: string[] }>
   signIn: (data: {
     username: string
     password: string

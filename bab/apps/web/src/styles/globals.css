@@ -1,0 +1,123 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #020617;
+  --foreground: #f8fafc;
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+body {
+  min-height: 100dvh;
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-top: env(safe-area-inset-top);
+}
+
+@layer components {
+  .glass {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10;
+  }
+
+  .glass-strong {
+    @apply bg-white/10 backdrop-blur-2xl border border-white/15;
+  }
+
+  .glass-card {
+    @apply glass rounded-3xl p-6;
+  }
+
+  .btn-primary {
+    @apply bg-bab-600 hover:bg-bab-500 text-white font-semibold rounded-2xl px-6 py-3.5 transition-all duration-200 active:scale-95;
+  }
+
+  .btn-secondary {
+    @apply glass hover:bg-white/10 text-white font-semibold rounded-2xl px-6 py-3.5 transition-all duration-200 active:scale-95;
+  }
+
+  .btn-ghost {
+    @apply hover:bg-white/5 text-white/70 hover:text-white font-medium rounded-xl px-4 py-2 transition-all duration-200;
+  }
+
+  .input-field {
+    @apply w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-bab-500/50 focus:border-bab-500/50 transition-all;
+  }
+
+  .nav-item {
+    @apply flex flex-col items-center gap-1 text-white/40 hover:text-white/70 transition-colors text-xs;
+  }
+
+  .nav-item-active {
+    @apply text-bab-400;
+  }
+
+  .score-badge {
+    @apply inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold;
+  }
+
+  .badge-very-similar {
+    @apply bg-emerald-500/20 text-emerald-400;
+  }
+
+  .badge-similar {
+    @apply bg-blue-500/20 text-blue-400;
+  }
+
+  .badge-possible {
+    @apply bg-amber-500/20 text-amber-400;
+  }
+
+  .badge-low {
+    @apply bg-white/10 text-white/50;
+  }
+
+  .skeleton {
+    @apply animate-pulse bg-white/5 rounded-2xl;
+  }
+
+  .scanning-line {
+    @apply absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-bab-400 to-transparent;
+    animation: scan 2s ease-in-out infinite;
+  }
+}
+
+@layer utilities {
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .text-gradient {
+    @apply bg-gradient-to-r from-bab-400 to-bab-600 bg-clip-text text-transparent;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

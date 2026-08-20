@@ -1,35 +1,14 @@
-import { Pool } from 'pg'
+const { Pool } = require('pg')
 
-const pool = process.env.DATABASE_URL
-  ? new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: process.env.DATABASE_URL.includes('localhost') || process.env.DATABASE_URL.includes('127.0.0.1')
-        ? undefined
-        : { rejectUnauthorized: false },
-      max: 20,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 5000,
-    })
-  : new Pool({
-      host: 'localhost',
-      port: 5432,
-      database: 'haven_db',
-      user: 'bab_user',
-      password: 'bab_password',
-      max: 20,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 2000,
-    })
+async function migrate() {
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false },
+  })
 
-export default pool
-
-let migrationPromise: Promise<void> | null = null
-
-function getMigrations(): string[] {
-  return [
+  const migrations = [
     `CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`,
     `CREATE EXTENSION IF NOT EXISTS "pgcrypto"`,
-
     `CREATE TABLE IF NOT EXISTS users (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       email TEXT UNIQUE NOT NULL,
@@ -49,10 +28,6 @@ function getMigrations(): string[] {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-
-    `DO $$ BEGIN ALTER TABLE users DROP CONSTRAINT IF EXISTS username_length; EXCEPTION WHEN others THEN NULL; END $$`,
-    `DO $$ BEGIN ALTER TABLE users ADD CONSTRAINT username_length CHECK (char_length(username) >= 2 AND char_length(username) <= 16); EXCEPTION WHEN others THEN NULL; END $$`,
-
     `CREATE TABLE IF NOT EXISTS user_settings (
       user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       language TEXT DEFAULT 'ar',
@@ -62,7 +37,6 @@ function getMigrations(): string[] {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-
     `CREATE TABLE IF NOT EXISTS privacy_settings (
       user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       last_seen_visibility TEXT DEFAULT 'followers',
@@ -75,14 +49,12 @@ function getMigrations(): string[] {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-
     `CREATE TABLE IF NOT EXISTS follows (
       follower_id UUID REFERENCES users(id) ON DELETE CASCADE,
       following_id UUID REFERENCES users(id) ON DELETE CASCADE,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       PRIMARY KEY (follower_id, following_id)
     )`,
-
     `CREATE TABLE IF NOT EXISTS follow_requests (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       requester_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -91,14 +63,12 @@ function getMigrations(): string[] {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(requester_id, target_id)
     )`,
-
     `CREATE TABLE IF NOT EXISTS blocks (
       blocker_id UUID REFERENCES users(id) ON DELETE CASCADE,
       blocked_id UUID REFERENCES users(id) ON DELETE CASCADE,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       PRIMARY KEY (blocker_id, blocked_id)
     )`,
-
     `CREATE TABLE IF NOT EXISTS mutes (
       user_id UUID REFERENCES users(id) ON DELETE CASCADE,
       muted_id UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -106,7 +76,6 @@ function getMigrations(): string[] {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       PRIMARY KEY (user_id, muted_id)
     )`,
-
     `CREATE TABLE IF NOT EXISTS posts (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -124,7 +93,6 @@ function getMigrations(): string[] {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-
     `CREATE TABLE IF NOT EXISTS post_media (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
@@ -137,14 +105,12 @@ function getMigrations(): string[] {
       "order" INT DEFAULT 0,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-
     `CREATE TABLE IF NOT EXISTS likes (
       user_id UUID REFERENCES users(id) ON DELETE CASCADE,
       post_id UUID REFERENCES posts(id) ON DELETE CASCADE,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       PRIMARY KEY (user_id, post_id)
     )`,
-
     `CREATE TABLE IF NOT EXISTS comments (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
@@ -155,7 +121,6 @@ function getMigrations(): string[] {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-
     `CREATE TABLE IF NOT EXISTS bookmarks (
       user_id UUID REFERENCES users(id) ON DELETE CASCADE,
       post_id UUID REFERENCES posts(id) ON DELETE CASCADE,
@@ -163,14 +128,12 @@ function getMigrations(): string[] {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       PRIMARY KEY (user_id, post_id)
     )`,
-
     `CREATE TABLE IF NOT EXISTS bookmark_collections (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-
     `CREATE TABLE IF NOT EXISTS conversations (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       type TEXT DEFAULT 'direct',
@@ -182,7 +145,6 @@ function getMigrations(): string[] {
       owner_id UUID REFERENCES users(id) ON DELETE SET NULL,
       members_count INT DEFAULT 0
     )`,
-
     `CREATE TABLE IF NOT EXISTS conversation_members (
       conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
       user_id UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -193,7 +155,6 @@ function getMigrations(): string[] {
       joined_at TIMESTAMPTZ DEFAULT NOW(),
       PRIMARY KEY (conversation_id, user_id)
     )`,
-
     `CREATE TABLE IF NOT EXISTS messages (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
@@ -210,7 +171,6 @@ function getMigrations(): string[] {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-
     `CREATE TABLE IF NOT EXISTS message_receipts (
       message_id UUID REFERENCES messages(id) ON DELETE CASCADE,
       user_id UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -219,7 +179,6 @@ function getMigrations(): string[] {
       updated_at TIMESTAMPTZ DEFAULT NOW(),
       PRIMARY KEY (message_id, user_id)
     )`,
-
     `CREATE TABLE IF NOT EXISTS message_reactions (
       id UUID DEFAULT uuid_generate_v4(),
       message_id UUID REFERENCES messages(id) ON DELETE CASCADE,
@@ -228,7 +187,6 @@ function getMigrations(): string[] {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       PRIMARY KEY (message_id, user_id, emoji)
     )`,
-
     `CREATE TABLE IF NOT EXISTS notifications (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -240,7 +198,6 @@ function getMigrations(): string[] {
       is_read BOOLEAN DEFAULT FALSE,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-
     `CREATE TABLE IF NOT EXISTS group_members (
       conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
       user_id UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -251,7 +208,6 @@ function getMigrations(): string[] {
       joined_at TIMESTAMPTZ DEFAULT NOW(),
       PRIMARY KEY (conversation_id, user_id)
     )`,
-
     `CREATE TABLE IF NOT EXISTS group_messages (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       group_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
@@ -268,7 +224,6 @@ function getMigrations(): string[] {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-
     `CREATE TABLE IF NOT EXISTS group_reactions (
       id UUID DEFAULT uuid_generate_v4(),
       message_id UUID REFERENCES group_messages(id) ON DELETE CASCADE,
@@ -277,7 +232,6 @@ function getMigrations(): string[] {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       PRIMARY KEY (message_id, user_id, emoji)
     )`,
-
     `CREATE TABLE IF NOT EXISTS stories (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -290,14 +244,12 @@ function getMigrations(): string[] {
       expires_at TIMESTAMPTZ NOT NULL,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-
     `CREATE TABLE IF NOT EXISTS story_views (
       story_id UUID REFERENCES stories(id) ON DELETE CASCADE,
       user_id UUID REFERENCES users(id) ON DELETE CASCADE,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       PRIMARY KEY (story_id, user_id)
     )`,
-
     `CREATE TABLE IF NOT EXISTS security_events (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -307,7 +259,6 @@ function getMigrations(): string[] {
       metadata JSONB,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-
     `CREATE TABLE IF NOT EXISTS devices (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -319,7 +270,6 @@ function getMigrations(): string[] {
       last_active TIMESTAMPTZ DEFAULT NOW(),
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-
     `CREATE TABLE IF NOT EXISTS reports (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       reporter_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -330,7 +280,6 @@ function getMigrations(): string[] {
       status TEXT DEFAULT 'pending',
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-
     `CREATE TABLE IF NOT EXISTS password_resets (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -339,7 +288,6 @@ function getMigrations(): string[] {
       used BOOLEAN DEFAULT FALSE,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-
     `CREATE TABLE IF NOT EXISTS recovery_codes (
       id UUID DEFAULT uuid_generate_v4(),
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -348,7 +296,6 @@ function getMigrations(): string[] {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       PRIMARY KEY (id)
     )`,
-
     `CREATE TABLE IF NOT EXISTS two_factor_auth (
       user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       secret TEXT NOT NULL,
@@ -356,48 +303,24 @@ function getMigrations(): string[] {
       enabled_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-
-    `CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)`,
-    `CREATE INDEX IF NOT EXISTS idx_users_lower_username ON users(lower(username))`,
-    `CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)`,
-    `CREATE INDEX IF NOT EXISTS idx_follows_follower ON follows(follower_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_follows_following ON follows(following_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_posts_user_id ON posts(user_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at DESC)`,
-    `CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at DESC)`,
-    `CREATE INDEX IF NOT EXISTS idx_conversation_members_user ON conversation_members(user_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at DESC)`,
-    `CREATE INDEX IF NOT EXISTS idx_stories_user ON stories(user_id, created_at DESC)`,
-    `CREATE INDEX IF NOT EXISTS idx_security_events_user ON security_events(user_id, created_at DESC)`,
-    `CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id)`,
+    `DO $$ BEGIN ALTER TABLE users ADD CONSTRAINT username_length CHECK (char_length(username) >= 2 AND char_length(username) <= 16); EXCEPTION WHEN others THEN NULL; END $$`,
   ]
-}
 
-async function runMigrations() {
-  const migrations = getMigrations()
-  try {
-    for (const sql of migrations) {
-      try {
-        await pool.query(sql)
-      } catch (e: any) {
-        if (!e.message?.includes('already exists')) {
-          console.error('Migration error:', e.message)
-        }
+  let success = 0
+  let errors = 0
+  for (const sql of migrations) {
+    try {
+      await pool.query(sql)
+      success++
+    } catch (e) {
+      if (!e.message?.includes('already exists')) {
+        console.error('ERROR:', e.message)
+        errors++
       }
     }
-    console.log('HAVEN: Database migrations completed')
-  } catch (error: any) {
-    console.error('HAVEN: Migration failed:', error.message)
   }
+  console.log(`Migration done: ${success} success, ${errors} errors`)
+  await pool.end()
 }
 
-migrationPromise = runMigrations()
-
-export async function query(text: string, params?: any[]) {
-  if (migrationPromise) {
-    await migrationPromise
-    migrationPromise = null
-  }
-  const result = await pool.query(text, params)
-  return result
-}
+migrate().catch(e => { console.error(e); process.exit(1) })

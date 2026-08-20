@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
-import { getSocket, connectSocket } from '@/lib/socket'
+import { connectSocket, getSocket } from '@/lib/socket'
 
 type CallStatus = 'connecting' | 'ringing' | 'active' | 'ended' | 'error'
 
@@ -36,12 +36,15 @@ export default function VideoCallPage() {
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const remoteVideoRef = useRef<HTMLVideoElement>(null)
   const timerRef = useRef<NodeJS.Timeout | null>(null)
+  const pollRef = useRef<NodeJS.Timeout | null>(null)
+  const signalSinceRef = useRef('')
   const endedRef = useRef(false)
   const gotOfferRef = useRef(false)
   const gotAnswerRef = useRef(false)
+  const useWebSocketRef = useRef(false)
 
   useEffect(() => {
-    return () => { cleanup() }
+    return () => cleanup()
   }, [])
 
   useEffect(() => {
@@ -50,20 +53,30 @@ export default function VideoCallPage() {
   }, [conversationId, user])
 
   const cleanup = () => {
+    endedRef.current = true
     localStreamRef.current?.getTracks().forEach(t => t.stop())
     localStreamRef.current = null
     peerRef.current?.close()
     peerRef.current = null
     if (timerRef.current) clearInterval(timerRef.current)
-    endedRef.current = true
+    if (pollRef.current) clearInterval(pollRef.current)
 
     const socket = getSocket()
     if (socket && callIdRef.current) {
       socket.emit('call:leave', { callId: callIdRef.current, conversationId })
       socket.off('signal')
       socket.off('call:ended')
-      socket.off('call:accepted')
+      socket.off('call:declined')
     }
+  }
+
+  const getToken = (): string | null => {
+    const cookies = document.cookie.split(';').reduce((acc, c) => {
+      const [k, v] = c.trim().split('=')
+      acc[k] = v
+      return acc
+    }, {} as Record<string, string>)
+    return cookies['haven_token'] || null
   }
 
   const initCall = async () => {
@@ -73,20 +86,6 @@ export default function VideoCallPage() {
         setStatus('error')
         return
       }
-
-      // Ensure socket is connected
-      const cookies = document.cookie.split(';').reduce((acc, c) => {
-        const [k, v] = c.trim().split('=')
-        acc[k] = v
-        return acc
-      }, {} as Record<string, string>)
-      const token = cookies['haven_token']
-      if (!token) {
-        setError('غير مصرح')
-        setStatus('error')
-        return
-      }
-      connectSocket(token)
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
@@ -109,9 +108,8 @@ export default function VideoCallPage() {
         amICallerRef.current = false
         callIdRef.current = checkData.call.id
         setStatus('ringing')
-        setupSocketListeners()
         setupPeer()
-        joinCallRoom()
+        setupSignaling()
       } else {
         amICallerRef.current = true
         await createCall()
@@ -143,10 +141,8 @@ export default function VideoCallPage() {
 
       callIdRef.current = data.call.id
       setStatus('ringing')
-
-      setupSocketListeners()
       setupPeer()
-      joinCallRoom()
+      setupSignaling()
 
       const pc = peerRef.current!
       const offer = await pc.createOffer()
@@ -154,13 +150,30 @@ export default function VideoCallPage() {
       sendSignal('offer', { sdp: offer.sdp, type: offer.type })
 
       const socket = getSocket()
-      if (socket) {
+      if (socket?.connected) {
         socket.emit('call:invite', { conversationId, callType: 'video' })
       }
     } catch (err: any) {
       setError(err.message || 'فشل إنشاء المكالمة')
       setStatus('error')
     }
+  }
+
+  const setupSignaling = () => {
+    const token = getToken()
+    if (token) connectSocket(token)
+
+    setTimeout(() => {
+      const socket = getSocket()
+      if (socket?.connected) {
+        useWebSocketRef.current = true
+        setupSocketSignaling()
+        joinCallRoom()
+      } else {
+        useWebSocketRef.current = false
+        startPolling()
+      }
+    }, 500)
   }
 
   const setupPeer = () => {
@@ -183,11 +196,10 @@ export default function VideoCallPage() {
     }
 
     pc.onconnectionstatechange = () => {
-      const state = pc.connectionState
-      if (state === 'connected') {
+      if (pc.connectionState === 'connected') {
         setStatus('active')
         timerRef.current = setInterval(() => setDuration(p => p + 1), 1000)
-      } else if (state === 'failed' || state === 'disconnected') {
+      } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
         endCall()
       }
     }
@@ -206,45 +218,95 @@ export default function VideoCallPage() {
     }
   }
 
-  const setupSocketListeners = () => {
+  const setupSocketSignaling = () => {
     const socket = getSocket()
     if (!socket) return
 
     socket.on('signal', async (data: { from: string; type: string; payload: any }) => {
       if (data.from === user?.id) return
-      const pc = peerRef.current
-      if (!pc) return
-
-      if (data.type === 'offer' && !gotOfferRef.current) {
-        gotOfferRef.current = true
-        await pc.setRemoteDescription(new RTCSessionDescription(data.payload))
-        const answer = await pc.createAnswer()
-        await pc.setLocalDescription(answer)
-        sendSignal('answer', { sdp: answer.sdp, type: answer.type })
-
-        await fetch(`/api/calls/${conversationId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ action: 'answer', callId: callIdRef.current }),
-        })
-      } else if (data.type === 'answer' && !gotAnswerRef.current) {
-        gotAnswerRef.current = true
-        await pc.setRemoteDescription(new RTCSessionDescription(data.payload))
-      } else if (data.type === 'ice-candidate') {
-        try { await pc.addIceCandidate(new RTCIceCandidate(data.payload)) } catch {}
-      }
+      await handleSignal(data.type, data.payload)
     })
 
     socket.on('call:ended', () => endCall())
     socket.on('call:declined', () => endCall())
   }
 
-  const sendSignal = (type: string, data: any) => {
-    const socket = getSocket()
-    if (socket && callIdRef.current) {
-      socket.emit('signal', { callId: callIdRef.current, type, payload: data })
+  const startPolling = () => {
+    if (pollRef.current) clearInterval(pollRef.current)
+    signalSinceRef.current = '2000-01-01T00:00:00.000Z'
+
+    pollRef.current = setInterval(async () => {
+      if (!callIdRef.current || endedRef.current) return
+      try {
+        const res = await fetch(`/api/calls/${callIdRef.current}/signal?since=${encodeURIComponent(signalSinceRef.current)}`)
+        const data = await res.json()
+        if (!data.signals?.length) return
+
+        for (const sig of data.signals) {
+          if (sig.user_id === user?.id) continue
+          const sd = typeof sig.data === 'string' ? JSON.parse(sig.data) : sig.data
+          await handleSignal(sig.type, sd)
+
+          if (sig.type === 'answer') {
+            await fetch(`/api/calls/${conversationId}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ action: 'answer', callId: callIdRef.current }),
+            })
+          }
+        }
+        signalSinceRef.current = new Date().toISOString()
+      } catch {}
+    }, 200)
+  }
+
+  const handleSignal = async (type: string, payload: any) => {
+    const pc = peerRef.current
+    if (!pc) return
+
+    if (type === 'offer' && !gotOfferRef.current) {
+      gotOfferRef.current = true
+      await pc.setRemoteDescription(new RTCSessionDescription(payload))
+      const answer = await pc.createAnswer()
+      await pc.setLocalDescription(answer)
+      sendSignal('answer', { sdp: answer.sdp, type: answer.type })
+
+      await fetch(`/api/calls/${conversationId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ action: 'answer', callId: callIdRef.current }),
+      })
+    } else if (type === 'answer' && !gotAnswerRef.current) {
+      gotAnswerRef.current = true
+      await pc.setRemoteDescription(new RTCSessionDescription(payload))
+    } else if (type === 'ice-candidate') {
+      try { await pc.addIceCandidate(new RTCIceCandidate(payload)) } catch {}
+    } else if (type === 'end') {
+      endCall()
     }
+  }
+
+  const sendSignal = async (type: string, data: any) => {
+    if (!callIdRef.current) return
+
+    if (useWebSocketRef.current) {
+      const socket = getSocket()
+      if (socket?.connected) {
+        socket.emit('signal', { callId: callIdRef.current, type, payload: data })
+        return
+      }
+    }
+
+    try {
+      await fetch(`/api/calls/${callIdRef.current}/signal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ type, data }),
+      })
+    } catch {}
   }
 
   const endCall = async () => {
@@ -252,18 +314,24 @@ export default function VideoCallPage() {
     endedRef.current = true
 
     const socket = getSocket()
-    if (socket) socket.emit('call:end', { conversationId })
-
-    if (callIdRef.current) {
-      try {
-        await fetch(`/api/calls/${conversationId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ action: 'end', callId: callIdRef.current }),
-        })
-      } catch {}
+    if (socket?.connected) {
+      socket.emit('call:end', { conversationId })
     }
+
+    try {
+      await fetch(`/api/calls/${conversationId}/signal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ type: 'end', data: {} }),
+      }).catch(() => {})
+      await fetch(`/api/calls/${conversationId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ action: 'end', callId: callIdRef.current }),
+      }).catch(() => {})
+    } catch {}
 
     cleanup()
     setStatus('ended')
@@ -305,7 +373,6 @@ export default function VideoCallPage() {
 
   return (
     <div className="fixed inset-0 bg-[#0a0e17] flex flex-col overflow-hidden">
-      {/* Remote video background */}
       <div className="absolute inset-0 bg-gradient-to-b from-[#0f1520] to-[#0a0e17]">
         <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
         {status !== 'active' && (
@@ -321,7 +388,6 @@ export default function VideoCallPage() {
         )}
       </div>
 
-      {/* Header */}
       <div className="relative z-20 flex items-center justify-between px-6 pt-12 pb-4">
         <button onClick={endCall} className="p-3 rounded-2xl bg-black/30 backdrop-blur-xl hover:bg-black/40 transition-all">
           <svg className="w-5 h-5 text-white/70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -330,14 +396,13 @@ export default function VideoCallPage() {
         </button>
         <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-black/30 backdrop-blur-xl">
           <svg className="w-4 h-4 text-haven-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.5 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
           </svg>
           <span className="text-xs font-medium text-white/60">مشفرة</span>
         </div>
         <div className="w-11" />
       </div>
 
-      {/* Info + Local video PiP */}
       <div className="relative z-20 flex-1 flex flex-col items-center justify-between pb-8">
         <div className="text-center space-y-2 mt-4">
           <h1 className="text-xl font-bold text-white drop-shadow-lg">{otherUserName || 'مكالمة فيديو'}</h1>
@@ -352,7 +417,6 @@ export default function VideoCallPage() {
           </p>
         </div>
 
-        {/* Local video PiP */}
         {(status === 'active' || status === 'ringing') && (
           <div className="absolute top-20 right-6 w-28 h-40 rounded-2xl overflow-hidden border-2 border-white/10 shadow-2xl shadow-black/50 z-30">
             <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
@@ -366,7 +430,6 @@ export default function VideoCallPage() {
           </div>
         )}
 
-        {/* Controls */}
         <div className="w-full px-8">
           {(status === 'connecting' || status === 'error') && (
             <div className="flex flex-col items-center gap-4">

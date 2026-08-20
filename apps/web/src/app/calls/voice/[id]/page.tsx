@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
-import { getSocket, connectSocket } from '@/lib/socket'
+import { connectSocket, getSocket, getSignalingMode } from '@/lib/socket'
 
 type CallStatus = 'connecting' | 'ringing' | 'active' | 'ended' | 'error'
 
@@ -34,38 +34,47 @@ export default function VoiceCallPage() {
   const callIdRef = useRef<string | null>(null)
   const amICallerRef = useRef(false)
   const timerRef = useRef<NodeJS.Timeout | null>(null)
+  const pollRef = useRef<NodeJS.Timeout | null>(null)
+  const signalSinceRef = useRef('')
   const endedRef = useRef(false)
   const gotOfferRef = useRef(false)
   const gotAnswerRef = useRef(false)
+  const useWebSocketRef = useRef(false)
 
-  // Cleanup on unmount
   useEffect(() => {
-    return () => {
-      cleanup()
-    }
+    return () => cleanup()
   }, [])
 
-  // Initialize call when user is available
   useEffect(() => {
     if (!conversationId || !user) return
     initCall()
   }, [conversationId, user])
 
   const cleanup = () => {
+    endedRef.current = true
     localStreamRef.current?.getTracks().forEach(t => t.stop())
     localStreamRef.current = null
     peerRef.current?.close()
     peerRef.current = null
     if (timerRef.current) clearInterval(timerRef.current)
-    endedRef.current = true
+    if (pollRef.current) clearInterval(pollRef.current)
 
     const socket = getSocket()
     if (socket && callIdRef.current) {
       socket.emit('call:leave', { callId: callIdRef.current, conversationId })
       socket.off('signal')
       socket.off('call:ended')
-      socket.off('call:accepted')
+      socket.off('call:declined')
     }
+  }
+
+  const getToken = (): string | null => {
+    const cookies = document.cookie.split(';').reduce((acc, c) => {
+      const [k, v] = c.trim().split('=')
+      acc[k] = v
+      return acc
+    }, {} as Record<string, string>)
+    return cookies['haven_token'] || null
   }
 
   const initCall = async () => {
@@ -76,25 +85,9 @@ export default function VoiceCallPage() {
         return
       }
 
-      // Ensure socket is connected
-      const cookies = document.cookie.split(';').reduce((acc, c) => {
-        const [k, v] = c.trim().split('=')
-        acc[k] = v
-        return acc
-      }, {} as Record<string, string>)
-      const token = cookies['haven_token']
-      if (!token) {
-        setError('غير مصرح')
-        setStatus('error')
-        return
-      }
-      connectSocket(token)
-
-      // Get audio
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
       localStreamRef.current = stream
 
-      // Fetch conversation info
       try {
         const res = await fetch(`/api/conversations/${conversationId}`, { credentials: 'include' })
         const data = await res.json()
@@ -102,20 +95,16 @@ export default function VoiceCallPage() {
         setOtherUserAvatar(data.other_user?.avatar_url || '')
       } catch {}
 
-      // Check for existing ringing call (receiver)
       const checkRes = await fetch(`/api/calls/${conversationId}`, { credentials: 'include' })
       const checkData = await checkRes.json()
 
       if (checkData.call && checkData.call.status === 'ringing' && checkData.call.caller_id !== user?.id) {
-        // I am the receiver
         amICallerRef.current = false
         callIdRef.current = checkData.call.id
         setStatus('ringing')
-        setupSocketListeners()
         setupPeer()
-        joinCallRoom()
+        setupSignaling()
       } else {
-        // I am the caller - create new call
         amICallerRef.current = true
         await createCall()
       }
@@ -146,21 +135,16 @@ export default function VoiceCallPage() {
 
       callIdRef.current = data.call.id
       setStatus('ringing')
-
-      // Setup socket
-      setupSocketListeners()
       setupPeer()
-      joinCallRoom()
+      setupSignaling()
 
-      // Create and send offer
       const pc = peerRef.current!
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
       sendSignal('offer', { sdp: offer.sdp, type: offer.type })
 
-      // Notify other user via socket
       const socket = getSocket()
-      if (socket) {
+      if (socket?.connected) {
         socket.emit('call:invite', { conversationId, callType: 'voice' })
       }
     } catch (err: any) {
@@ -169,44 +153,53 @@ export default function VoiceCallPage() {
     }
   }
 
+  const setupSignaling = () => {
+    const token = getToken()
+    if (token) connectSocket(token)
+
+    setTimeout(() => {
+      const socket = getSocket()
+      if (socket?.connected) {
+        useWebSocketRef.current = true
+        setupSocketSignaling()
+        joinCallRoom()
+      } else {
+        useWebSocketRef.current = false
+        startPolling()
+      }
+    }, 500)
+  }
+
   const setupPeer = () => {
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
 
-    // Add local tracks
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(t => pc.addTrack(t, localStreamRef.current!))
     }
 
-    // Handle remote audio
     pc.ontrack = (event) => {
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = event.streams[0]
       }
     }
 
-    // Send ICE candidates
     pc.onicecandidate = (e) => {
       if (e.candidate) {
         sendSignal('ice-candidate', e.candidate.toJSON())
       }
     }
 
-    // Connection state
     pc.onconnectionstatechange = () => {
-      const state = pc.connectionState
-      if (state === 'connected') {
+      if (pc.connectionState === 'connected') {
         setStatus('active')
         timerRef.current = setInterval(() => setDuration(p => p + 1), 1000)
-      } else if (state === 'failed' || state === 'disconnected') {
+      } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
         endCall()
       }
     }
 
     pc.oniceconnectionstatechange = () => {
-      const state = pc.iceConnectionState
-      if (state === 'failed') {
-        endCall()
-      }
+      if (pc.iceConnectionState === 'failed') endCall()
     }
 
     peerRef.current = pc
@@ -219,76 +212,120 @@ export default function VoiceCallPage() {
     }
   }
 
-  const setupSocketListeners = () => {
+  const setupSocketSignaling = () => {
     const socket = getSocket()
     if (!socket) return
 
     socket.on('signal', async (data: { from: string; type: string; payload: any }) => {
-      if (data.from === user?.id) return // ignore own signals
-      const pc = peerRef.current
-      if (!pc) return
-
-      if (data.type === 'offer' && !gotOfferRef.current) {
-        gotOfferRef.current = true
-        await pc.setRemoteDescription(new RTCSessionDescription(data.payload))
-        const answer = await pc.createAnswer()
-        await pc.setLocalDescription(answer)
-        sendSignal('answer', { sdp: answer.sdp, type: answer.type })
-
-        // Mark call as answered
-        await fetch(`/api/calls/${conversationId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ action: 'answer', callId: callIdRef.current }),
-        })
-      } else if (data.type === 'answer' && !gotAnswerRef.current) {
-        gotAnswerRef.current = true
-        await pc.setRemoteDescription(new RTCSessionDescription(data.payload))
-      } else if (data.type === 'ice-candidate') {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(data.payload))
-        } catch {}
-      }
+      if (data.from === user?.id) return
+      await handleSignal(data.type, data.payload)
     })
 
-    socket.on('call:ended', () => {
-      endCall()
-    })
-
-    socket.on('call:declined', () => {
-      endCall()
-    })
+    socket.on('call:ended', () => endCall())
+    socket.on('call:declined', () => endCall())
   }
 
-  const sendSignal = (type: string, data: any) => {
-    const socket = getSocket()
-    if (socket && callIdRef.current) {
-      socket.emit('signal', { callId: callIdRef.current, type, payload: data })
+  const startPolling = () => {
+    if (pollRef.current) clearInterval(pollRef.current)
+    signalSinceRef.current = '2000-01-01T00:00:00.000Z'
+
+    pollRef.current = setInterval(async () => {
+      if (!callIdRef.current || endedRef.current) return
+      try {
+        const res = await fetch(`/api/calls/${callIdRef.current}/signal?since=${encodeURIComponent(signalSinceRef.current)}`)
+        const data = await res.json()
+        if (!data.signals?.length) return
+
+        for (const sig of data.signals) {
+          if (sig.user_id === user?.id) continue
+          const sd = typeof sig.data === 'string' ? JSON.parse(sig.data) : sig.data
+          await handleSignal(sig.type, sd)
+
+          if (sig.type === 'answer') {
+            await fetch(`/api/calls/${conversationId}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ action: 'answer', callId: callIdRef.current }),
+            })
+          }
+        }
+        signalSinceRef.current = new Date().toISOString()
+      } catch {}
+    }, 200)
+  }
+
+  const handleSignal = async (type: string, payload: any) => {
+    const pc = peerRef.current
+    if (!pc) return
+
+    if (type === 'offer' && !gotOfferRef.current) {
+      gotOfferRef.current = true
+      await pc.setRemoteDescription(new RTCSessionDescription(payload))
+      const answer = await pc.createAnswer()
+      await pc.setLocalDescription(answer)
+      sendSignal('answer', { sdp: answer.sdp, type: answer.type })
+
+      await fetch(`/api/calls/${conversationId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ action: 'answer', callId: callIdRef.current }),
+      })
+    } else if (type === 'answer' && !gotAnswerRef.current) {
+      gotAnswerRef.current = true
+      await pc.setRemoteDescription(new RTCSessionDescription(payload))
+    } else if (type === 'ice-candidate') {
+      try { await pc.addIceCandidate(new RTCIceCandidate(payload)) } catch {}
+    } else if (type === 'end') {
+      endCall()
     }
+  }
+
+  const sendSignal = async (type: string, data: any) => {
+    if (!callIdRef.current) return
+
+    if (useWebSocketRef.current) {
+      const socket = getSocket()
+      if (socket?.connected) {
+        socket.emit('signal', { callId: callIdRef.current, type, payload: data })
+        return
+      }
+    }
+
+    try {
+      await fetch(`/api/calls/${callIdRef.current}/signal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ type, data }),
+      })
+    } catch {}
   }
 
   const endCall = async () => {
     if (endedRef.current) return
     endedRef.current = true
 
-    // Notify other side
     const socket = getSocket()
-    if (socket) {
+    if (socket?.connected) {
       socket.emit('call:end', { conversationId })
     }
 
-    // Update DB
-    if (callIdRef.current) {
-      try {
-        await fetch(`/api/calls/${conversationId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ action: 'end', callId: callIdRef.current }),
-        })
-      } catch {}
-    }
+    try {
+      await fetch(`/api/calls/${conversationId}/signal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ type: 'end', data: {} }),
+      }).catch(() => {})
+      await fetch(`/api/calls/${conversationId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ action: 'end', callId: callIdRef.current }),
+      }).catch(() => {})
+    } catch {}
 
     cleanup()
     setStatus('ended')
@@ -314,14 +351,12 @@ export default function VoiceCallPage() {
     <div className="fixed inset-0 bg-[#0a0e17] flex flex-col items-center justify-between overflow-hidden">
       <audio ref={remoteAudioRef} autoPlay playsInline />
 
-      {/* Glow */}
       <div className="absolute inset-0">
         <div className={`absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full blur-[120px] transition-all duration-1000 ${
           status === 'active' ? 'bg-haven-500/10' : 'bg-haven-500/5'
         }`} />
       </div>
 
-      {/* Header */}
       <div className="relative z-10 w-full flex items-center justify-between px-6 pt-12 pb-4">
         <button onClick={endCall} className="p-3 rounded-2xl bg-white/5 hover:bg-white/10 transition-all">
           <svg className="w-5 h-5 text-white/70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -337,7 +372,6 @@ export default function VoiceCallPage() {
         <div className="w-11" />
       </div>
 
-      {/* Center */}
       <div className="relative z-10 flex-1 flex flex-col items-center justify-center gap-6">
         <div className={`relative w-32 h-32 rounded-full flex items-center justify-center transition-all duration-1000 ${
           status === 'active'
@@ -383,7 +417,6 @@ export default function VoiceCallPage() {
         </div>
       </div>
 
-      {/* Controls */}
       <div className="relative z-10 w-full px-8 pb-12">
         {status === 'error' && (
           <div className="flex flex-col items-center gap-4">

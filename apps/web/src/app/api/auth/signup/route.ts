@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
 
     return response
   } catch (error: any) {
-    console.error('Signup error:', error)
-    return NextResponse.json({ error: 'حدث خطأ أثناء التسجيل' }, { status: 500 })
+    console.error('Signup error:', error?.message, error?.stack)
+    return NextResponse.json({ error: 'حدث خطأ أثناء التسجيل', detail: error?.message }, { status: 500 })
   }
 }

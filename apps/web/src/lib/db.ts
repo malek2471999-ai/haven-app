@@ -1,6 +1,8 @@
 import { Pool } from 'pg'
 
-const pool = process.env.DATABASE_URL
+const isLocal = process.env.DATABASE_URL?.includes('localhost') || process.env.DATABASE_URL?.includes('127.0.0.1')
+
+const pool = process.env.DATABASE_URL && !isLocal
   ? new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
@@ -21,18 +23,10 @@ const pool = process.env.DATABASE_URL
 
 export default pool
 
-export async function query(text: string, params?: any[]) {
-  const result = await pool.query(text, params)
-  return result
-}
+let migrationPromise: Promise<void> | null = null
 
-let migrationRun = false
-
-async function runMigrations() {
-  if (migrationRun) return
-  migrationRun = true
-
-  const migrations = [
+function getMigrations(): string[] {
+  return [
     `CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`,
     `CREATE EXTENSION IF NOT EXISTS "pgcrypto"`,
 
@@ -374,7 +368,10 @@ async function runMigrations() {
     `CREATE INDEX IF NOT EXISTS idx_security_events_user ON security_events(user_id, created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id)`,
   ]
+}
 
+async function runMigrations() {
+  const migrations = getMigrations()
   try {
     for (const sql of migrations) {
       try {
@@ -385,14 +382,19 @@ async function runMigrations() {
         }
       }
     }
-    console.log('Database migrations completed')
+    console.log('HAVEN: Database migrations completed')
   } catch (error: any) {
-    console.error('Migration failed:', error.message)
+    console.error('HAVEN: Migration failed:', error.message)
   }
 }
 
-runMigrations()
+migrationPromise = runMigrations()
 
-pool.on('connect', () => {
-  runMigrations()
-})
+export async function query(text: string, params?: any[]) {
+  if (migrationPromise) {
+    await migrationPromise
+    migrationPromise = null
+  }
+  const result = await pool.query(text, params)
+  return result
+}

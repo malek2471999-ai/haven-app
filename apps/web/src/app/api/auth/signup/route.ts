@@ -28,8 +28,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'جميع الحقول مطلوبة' }, { status: 400 })
     }
 
-    if (username.length < 3 || username.length > 20) {
-      return NextResponse.json({ error: 'اسم المستخدم يجب أن يكون 3-20 حرف' }, { status: 400 })
+    if (username.length < 2 || username.length > 16) {
+      return NextResponse.json({ error: 'اسم المستخدم يجب أن يكون 2-16 حرف' }, { status: 400 })
     }
 
     if (!/^[a-zA-Z0-9_]+$/.test(username)) {

@@ -15,8 +15,8 @@ import { isValidUsername, isReservedUsername } from '@/lib/utils'
 const signupSchema = z.object({
   username: z
     .string()
-    .min(3, 'اسم المستخدم يجب أن يكون 3 أحرف على الأقل')
-    .max(20, 'اسم المستخدم يجب أن يكون 20 حرف كحد أقصى')
+    .min(2, 'اسم المستخدم يجب أن يكون حرفين على الأقل')
+    .max(16, 'اسم المستخدم يجب أن يكون 16 حرف كحد أقصى')
     .regex(/^[a-zA-Z0-9_]+$/, 'فقط الأحرف الإنجليزية والأرقام والشرطة السفلية')
     .refine((val) => !isReservedUsername(val), 'هذا الاسم محجوز'),
   displayName: z

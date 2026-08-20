@@ -50,6 +50,9 @@ function getMigrations(): string[] {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
+    `DO $$ BEGIN ALTER TABLE users DROP CONSTRAINT IF EXISTS username_length; EXCEPTION WHEN others THEN NULL; END $$`,
+    `DO $$ BEGIN ALTER TABLE users ADD CONSTRAINT username_length CHECK (char_length(username) >= 2 AND char_length(username) <= 16); EXCEPTION WHEN others THEN NULL; END $$`,
+
     `CREATE TABLE IF NOT EXISTS user_settings (
       user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       language TEXT DEFAULT 'ar',

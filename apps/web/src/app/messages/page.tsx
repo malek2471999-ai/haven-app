@@ -31,7 +31,6 @@ export default function MessagesPage() {
     }
   }, [isAuthenticated, user])
 
-  // Close menu on outside click
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
@@ -94,7 +93,7 @@ export default function MessagesPage() {
                   onClick={() => router.push(`/messages/${conv.id}`)}
                   className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-dark-800/20 active:bg-dark-800/30 transition-all duration-150 text-right"
                 >
-                  <div className="relative">
+                  <div className="relative shrink-0">
                     <Avatar
                       src={conv.other_user?.avatar_url}
                       alt={conv.other_user?.display_name}
@@ -129,7 +128,6 @@ export default function MessagesPage() {
                   </div>
                 </button>
 
-                {/* Three dot menu */}
                 <div ref={menuRef} className="absolute top-3 left-3">
                   <button
                     onClick={(e) => { e.stopPropagation(); setOpenMenu(openMenu === conv.id ? null : conv.id) }}
@@ -149,18 +147,18 @@ export default function MessagesPage() {
                         فتح المحادثة
                       </button>
                       <button
-                        onClick={(e) => { e.stopPropagation(); setOpenMenu(null) }}
+                        onClick={(e) => { e.stopPropagation(); router.push(`/calls/voice/${conv.id}`); setOpenMenu(null) }}
                         className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-dark-100 hover:bg-dark-700/50 transition-colors"
                       >
-                        <svg className="w-4 h-4 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
-                        كتم الصوت
+                        <svg className="w-4 h-4 text-haven-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" /></svg>
+                        مكالمة صوتية
                       </button>
                       <button
-                        onClick={(e) => { e.stopPropagation(); setOpenMenu(null) }}
+                        onClick={(e) => { e.stopPropagation(); router.push(`/calls/video/${conv.id}`); setOpenMenu(null) }}
                         className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-dark-100 hover:bg-dark-700/50 transition-colors"
                       >
-                        <svg className="w-4 h-4 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>
-                        أرشفة
+                        <svg className="w-4 h-4 text-haven-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" /></svg>
+                        مكالمة فيديو
                       </button>
                       <div className="border-t border-dark-700/50 my-1" />
                       <button

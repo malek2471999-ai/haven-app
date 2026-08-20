@@ -3,7 +3,11 @@
   "private": true,
   "scripts": {
     "build": "cd apps/web && npm install && npm run build",
-    "start": "cd apps/web && npm start",
+    "start": "cd apps/web && npx tsx server.ts",
     "postinstall": "cd apps/web && npm install"
+  },
+  "dependencies": {
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3"
   }
 }

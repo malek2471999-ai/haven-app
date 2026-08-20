@@ -357,6 +357,39 @@ function getMigrations(): string[] {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
+    `CREATE TABLE IF NOT EXISTS encryption_keys (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      public_key TEXT NOT NULL,
+      private_key TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    `CREATE INDEX IF NOT EXISTS idx_encryption_keys_user ON encryption_keys(user_id)`,
+
+    `CREATE TABLE IF NOT EXISTS call_sessions (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      caller_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT DEFAULT 'ringing',
+      answered_at TIMESTAMPTZ,
+      ended_at TIMESTAMPTZ,
+      duration INT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS call_signals (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      call_id UUID NOT NULL REFERENCES call_sessions(id) ON DELETE CASCADE,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      data JSONB NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    `CREATE INDEX IF NOT EXISTS idx_call_sessions_conversation ON call_sessions(conversation_id, status)`,
+    `CREATE INDEX IF NOT EXISTS idx_call_signals_call ON call_signals(call_id, created_at)`,
+
     `CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)`,
     `CREATE INDEX IF NOT EXISTS idx_users_lower_username ON users(lower(username))`,
     `CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)`,

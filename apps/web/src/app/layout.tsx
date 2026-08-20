@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import '@/styles/globals.css'
+import { Providers } from '@/components/Providers'
 
 export const metadata: Metadata = {
   title: 'HAVEN - Your Safe Place to Connect',
@@ -28,7 +29,7 @@ export default function RootLayout({
   return (
     <html lang="ar" dir="rtl" className="dark">
       <body className="min-h-screen bg-dark-950 text-dark-100 antialiased font-arabic">
-        {children}
+        <Providers>{children}</Providers>
       </body>
     </html>
   )

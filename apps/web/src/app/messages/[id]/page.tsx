@@ -69,8 +69,8 @@ export default function ConversationPage() {
   // Message context menu
   const [contextMenu, setContextMenu] = useState<{ msgId: string; x: number; y: number } | null>(null)
 
-  // Disappearing messages
-  const [disappearingMode, setDisappearingMode] = useState<number | null>(null)
+  // Polling interval ref
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   // Recording
   const [isRecording, setIsRecording] = useState(false)
@@ -152,7 +152,7 @@ export default function ConversationPage() {
     }
   }, [isAuthenticated, user, conversationId, encReady, router])
 
-  // Polling for new messages every 3 seconds
+  // Polling for new messages every 1.5 seconds
   useEffect(() => {
     if (!isAuthenticated || !user || !conversationId || !encReady) return
 
@@ -161,12 +161,13 @@ export default function ConversationPage() {
       Notification.requestPermission()
     }
 
-    const pollInterval = setInterval(async () => {
+    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+
+    pollIntervalRef.current = setInterval(async () => {
       try {
         const res = await fetch(`/api/conversations/${conversationId}/messages?since=${encodeURIComponent(lastFetchRef.current)}`)
         const data = await res.json()
         if (data.messages && data.messages.length > 0) {
-          lastFetchRef.current = new Date().toISOString()
           setMessages(prev => {
             const existingIds = new Set(prev.map((m: any) => m.id))
             const newMsgs = data.messages.filter((m: any) => !existingIds.has(m.id))
@@ -199,9 +200,9 @@ export default function ConversationPage() {
         const pinnedData = await pinnedRes.json()
         setPinnedMessages(pinnedData.pinned || [])
       } catch {}
-    }, 3000)
+    }, 1500)
 
-    return () => clearInterval(pollInterval)
+    return () => { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current) }
   }, [isAuthenticated, user, conversationId, encReady])
 
   // Mark as read on focus
@@ -286,7 +287,6 @@ export default function ConversationPage() {
           content: contentToSend,
           type: 'text',
           replyToId: replyTo?.id || undefined,
-          expiresIn: disappearingMode || undefined,
         }),
       })
       const data = await res.json()
@@ -294,6 +294,7 @@ export default function ConversationPage() {
         setMessages(prev => [...prev, data.message])
         setDisplayMessages(prev => [...prev, { ...data.message, content, decrypted: true }])
         setReplyTo(null)
+        lastFetchRef.current = new Date().toISOString()
       }
     } catch {}
     setSending(false)
@@ -367,12 +368,6 @@ export default function ConversationPage() {
       setMessages(prev => prev.map((m: any) => m.id === messageId ? { ...m, is_deleted: true } : m))
       setContextMenu(null)
     } catch {}
-  }
-
-  // Disappearing message toggle
-  const toggleDisappearing = (seconds: number | null) => {
-    setDisappearingMode(seconds)
-    setContextMenu(null)
   }
 
   // Upload file
@@ -965,17 +960,6 @@ export default function ConversationPage() {
           </div>
         )}
 
-        {/* Disappearing mode indicator */}
-        {disappearingMode && (
-          <div className="flex items-center gap-2 mb-2 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20">
-            <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <span className="text-xs text-red-400">رسائل مختفية ({disappearingMode === 60 ? 'دقيقة' : disappearingMode === 3600 ? 'ساعة' : '24 ساعة'})</span>
-            <button onClick={() => setDisappearingMode(null)} className="text-xs text-dark-400 hover:text-dark-200">إلغاء</button>
-          </div>
-        )}
-
         {isRecording ? (
           <div className="flex items-center gap-3 bg-red-500/10 border border-red-500/30 rounded-2xl px-4 py-3 animate-pulse-glow">
             <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse" />
@@ -989,17 +973,6 @@ export default function ConversationPage() {
           </div>
         ) : (
           <div className="flex items-end gap-2">
-            {/* Disappearing messages button */}
-            <button onClick={() => {
-              const modes = [null, 60, 3600, 86400]
-              const idx = modes.indexOf(disappearingMode)
-              setDisappearingMode(modes[(idx + 1) % modes.length])
-            }} className={`p-3 rounded-xl border transition-all shrink-0 ${disappearingMode ? 'bg-red-500/10 border-red-500/30 text-red-400' : 'bg-dark-800/80 border-dark-700/50 text-dark-400 hover:text-red-400 hover:border-red-500/30'}`}>
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </button>
-
             <button onClick={startRecording} className="p-3 rounded-xl bg-dark-800/80 border border-dark-700/50 text-dark-400 hover:text-haven-400 hover:border-haven-500/30 transition-all shrink-0">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
